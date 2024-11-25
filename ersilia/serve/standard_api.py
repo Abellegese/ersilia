@@ -285,7 +285,7 @@ class StandardCSVRunApi(ErsiliaBase):
         input_data = self.serialize_to_json(input)
         self.logger.debug(f"Serialized data: {input_data}")
 
-        self.check_api_health_and_ensure()
+        self.check_api_health_and_ensure(self.url)
         
         container_name = self.get_running_container_name()
         if not container_name:
