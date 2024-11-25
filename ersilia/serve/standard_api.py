@@ -291,12 +291,8 @@ class StandardCSVRunApi(ErsiliaBase):
             self.logger.error("No running container found.")
             return None
 
-        base_url = self.url.split('/')[2]
-        updated_url = self.url.replace(base_url.split(':')[0], container_name) 
-        self.logger.debug(f"Posting data to: {updated_url}")
-
         try:
-            response = requests.post(updated_url, json=input_data)
+            response = requests.post(self.url, json=input_data)
             self.logger.debug(f"Status Code: {response.status_code}")
             if response.status_code == 200:
                 result = response.json()
@@ -373,6 +369,7 @@ class StandardCSVRunApi(ErsiliaBase):
             return None
         finally:
             docker_client.close()
+            
 class StandardQueryApi(object):
     def __init__(self, model_id, url):
         # TODO This class will be used to query directly the calculations lake.
