@@ -221,11 +221,13 @@ class StandardCSVRunApi(ErsiliaBase):
     def get_list_from_csv(self, input_data):
         smiles_list = []
         with open(input_data, mode='r') as file:
-            reader = csv.DictReader(file)
+            reader = csv.reader(file)  
+            next(reader, None)  
             for row in reader:
-                smiles = row[0]
-                if smiles and smiles not in smiles_list and self.validate_smiles(smiles):
-                    smiles_list.append(smiles)
+                if row:  
+                    smiles = row[0]  
+                    if smiles and smiles not in smiles_list and self.validate_smiles(smiles):
+                        smiles_list.append(smiles)
         return smiles_list
 
     def serialize_to_json(self, input_data):
