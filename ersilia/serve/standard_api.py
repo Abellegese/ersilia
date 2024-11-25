@@ -281,14 +281,20 @@ class StandardCSVRunApi(ErsiliaBase):
 
     def post(self, input, output, output_source=OutputSource.LOCAL_ONLY):
         input_data = self.serialize_to_json(input)
+        self.logger.debug(f"Serialized daata: {input_data}")
         if OutputSource.is_cloud(output_source):
             store = InferenceStoreApi(model_id=self.model_id)
             return store.get_precalculations(input_data)
         url = "{0}/{1}".format(self.url, self.api_name)
+        self.logger.debug(f"Posting data to: {url}")
+    
         response = requests.post(url, json=input_data)
+        self.logger.debug(f"Status Code: {response.status_code}")
         if response.status_code == 200:
             result = response.json()
+            self.logger.debug(f"Result: {result}")
             output_data = self.serialize_to_csv(input_data, result, output)
+            self.logger.debug(f"Outdata: {result}")
             return output_data
         else:
             return None
