@@ -284,8 +284,7 @@ class StandardCSVRunApi(ErsiliaBase):
     def post(self, input, output, output_source=OutputSource.LOCAL_ONLY):
         input_data = self.serialize_to_json(input)
         self.logger.debug(f"Serialized data: {input_data}")
-        self.show_nginx_logs_and_config()
-        self.check_api_health_and_ensure(self.url)
+        self.ensure_nginx_config()
         url = "{0}/{1}".format(self.url, self.api_name)
         try:
             self.logger.info(f"URL: {url}")
@@ -363,7 +362,7 @@ class StandardCSVRunApi(ErsiliaBase):
         except requests.RequestException as e:
             self.logger.error(f"API health check failed: {e}")
 
-        self.logger.info("API not reachable. Attempting to reconfigure nginx and restart the container.")
+        self.logger.info("API not reachable.")
         self.ensure_nginx_config()
 
         time.sleep(5)
