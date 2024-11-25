@@ -286,10 +286,10 @@ class StandardCSVRunApi(ErsiliaBase):
         self.logger.debug(f"Serialized data: {input_data}")
         self.show_nginx_logs_and_config()
         self.check_api_health_and_ensure(self.url)
-        
+        url = "{0}/{1}".format(self.url, self.api_name)
         try:
-            self.logger.info(f"URL: {self.url}")
-            response = requests.post(self.url, json=input_data)
+            self.logger.info(f"URL: {url}")
+            response = requests.post(url, json=input_data)
             self.logger.debug(f"Status Code: {response.status_code}")
             if response.status_code == 200:
                 result = response.json()
