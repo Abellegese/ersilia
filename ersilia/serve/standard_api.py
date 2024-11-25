@@ -284,8 +284,9 @@ class StandardCSVRunApi(ErsiliaBase):
     def post(self, input, output, output_source=OutputSource.LOCAL_ONLY):
         input_data = self.serialize_to_json(input)
         self.logger.debug(f"Serialized data: {input_data}")
-        self.ensure_nginx_config()
 
+        self.check_api_health_and_ensure()
+        
         container_name = self.get_running_container_name()
         if not container_name:
             self.logger.error("No running container found.")
@@ -322,15 +323,15 @@ class StandardCSVRunApi(ErsiliaBase):
 
             nginx_conf_path = "/etc/nginx/nginx.conf"
             nginx_server_block = """
-                server {
+                server {{
                     listen 80;
-                    location / {
-                        proxy_pass http://{container_name}:3000;
+                    location / {{
+                        proxy_pass http://{container_name};
                         proxy_set_header Host $host;
                         proxy_set_header X-Real-IP $remote_addr;
                         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                    }
-                }
+                    }}
+                }}
             """.format(container_name=container_name)
 
             self.logger.info(f"Adding server block to nginx.conf in container: {container_name}")
@@ -355,6 +356,32 @@ class StandardCSVRunApi(ErsiliaBase):
         finally:
             docker_client.close()
 
+    def check_api_health_and_ensure(self, url):
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                self.logger.info(f"API at {url} is working.")
+                return True
+            else:
+                self.logger.info(f"API returned status code {response.status_code}.")
+        except requests.RequestException as e:
+            self.logger.error(f"API health check failed: {e}")
+
+        self.logger.info("API not reachable. Attempting to reconfigure nginx and restart the container.")
+        self.ensure_nginx_config()
+
+        time.sleep(5)
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                self.logger.info(f"API at {url} is now working after reconfiguration.")
+                return True
+            else:
+                self.logger.info(f"API still returned status code {response.status_code} after reconfiguration.")
+        except requests.RequestException as e:
+            self.logger.info(f"API health check failed after reconfiguration: {e}")
+    
+
     def get_running_container_name(self):
         """Fetch the name of the first running container."""
         docker_client = docker.from_env()
@@ -369,7 +396,7 @@ class StandardCSVRunApi(ErsiliaBase):
             return None
         finally:
             docker_client.close()
-            
+
 class StandardQueryApi(object):
     def __init__(self, model_id, url):
         # TODO This class will be used to query directly the calculations lake.
