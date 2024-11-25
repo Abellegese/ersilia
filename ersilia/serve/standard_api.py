@@ -223,7 +223,7 @@ class StandardCSVRunApi(ErsiliaBase):
         with open(input_data, mode='r') as file:
             reader = csv.DictReader(file)
             for row in reader:
-                smiles = row.get('input')
+                smiles = row[0]
                 if smiles and smiles not in smiles_list and self.validate_smiles(smiles):
                     smiles_list.append(smiles)
         return smiles_list
@@ -281,55 +281,27 @@ class StandardCSVRunApi(ErsiliaBase):
                 writer.writerow(r)
         return output_data
 
-    MAX_RETRIES = 3  # Maximum number of retries for the API call
-    RETRY_DELAY = 5  # Initial delay in seconds between retries
-
     def post(self, input, output, output_source=OutputSource.LOCAL_ONLY):
         input_data = self.serialize_to_json(input)
         self.logger.debug(f"Serialized data: {input_data}")
-        
-        # Construct the URL
+        self.check_api_health_and_ensure(self.url)
         url = "{0}/{1}".format(self.url, self.api_name)
-
-        self.logger.debug(f"Posting data to: {url}")
-
-        # Retry logic for API call
-        retries = 0
-        while retries < self.MAX_RETRIES:
-            try:
-                response = requests.post(url, json=input_data)
-                self.logger.debug(f"Status Code: {response.status_code}")
-                
-                # Success case
-                if response.status_code == 200:
-                    result = response.json()
-                    self.logger.debug(f"Result: {result}")
-                    output_data = self.serialize_to_csv(input_data, result, output)
-                    self.logger.debug(f"Outdata: {result}")
-                    return output_data
-
-                # Deadlock detection (e.g., 500 errors)
-                if response.status_code == 500:
-                    self.logger.warning("API might be in deadlock. Retrying...")
-
-            except requests.exceptions.RequestException as e:
-                self.logger.error(f"API call failed: {e}")
-
-            # Increment retries and wait
-            retries += 1
-            time.sleep(self.RETRY_DELAY * retries)  # Exponential backoff
-
-        # API unresponsive after retries, attempt recovery
-        self.logger.error("API is unresponsive after multiple retries. Attempting recovery...")
-        self.ensure_nginx_config()
-
-        # Final API health check after recovery
-        if not self.check_api_health(url):
-            self.logger.critical("API recovery failed. Manual intervention required.")
+        try:
+            self.logger.info(f"URL: {url}")
+            response = requests.post(url, json=input_data)
+            self.logger.debug(f"Status Code: {response.status_code}")
+            if response.status_code == 200:
+                result = response.json()
+                self.logger.debug(f"Result: {result}")
+                output_data = self.serialize_to_csv(input_data, result, output)
+                self.logger.debug(f"Output data: {output_data}")
+                return output_data
+            else:
+                self.logger.error(f"API request failed with status code {response.status_code}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error during API request: {str(e)}")
             return None
-        else:
-            self.logger.info("API recovered successfully. Retrying the request.")
-            return self.post(input, output, output_source)
 
     def ensure_nginx_config(self):
         docker_client = docker.from_env()
