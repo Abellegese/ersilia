@@ -2,6 +2,7 @@ import os
 import csv
 import json
 import importlib
+import docker
 import requests
 import asyncio
 import nest_asyncio
@@ -282,6 +283,7 @@ class StandardCSVRunApi(ErsiliaBase):
     def post(self, input, output, output_source=OutputSource.LOCAL_ONLY):
         input_data = self.serialize_to_json(input)
         self.logger.debug(f"Serialized daata: {input_data}")
+        self.ensure_nginx_config()
         if OutputSource.is_cloud(output_source):
             store = InferenceStoreApi(model_id=self.model_id)
             return store.get_precalculations(input_data)
@@ -298,6 +300,57 @@ class StandardCSVRunApi(ErsiliaBase):
             return output_data
         else:
             return None
+        
+    def ensure_nginx_config(self):
+        docker_client = docker.from_env()
+
+        try:
+            containers = docker_client.containers.list()
+            if not containers:
+                self.logger.error("No running containers found.")
+                return
+            
+            container = containers[0]  
+            container_name = container.name
+            self.logger.info(f"Found running container: {container_name}")
+
+            self.logger.info(f"Logging container output for {container_name}")
+            logs = container.logs().decode("utf-8")
+            self.logger.info(f"Container logs:\n{logs}")
+
+            nginx_conf_path = "/etc/nginx/nginx.conf"
+            nginx_conf_update = """
+            http {
+                server {
+                    listen 80;
+                    location / {
+                        proxy_pass http://127.0.0.1:3000;
+                        proxy_set_header Host $host;
+                        proxy_set_header X-Real-IP $remote_addr;
+                        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    }
+                }
+            }
+            """
+            self.logger.info(f"Updating nginx.conf in container: {container_name}")
+            exec_result = container.exec_run(
+                cmd=f"sh -c 'echo \"{nginx_conf_update}\" > {nginx_conf_path}'",
+                stdout=True,
+                stderr=True
+            )
+            if exec_result.exit_code != 0:
+                self.logger.error(f"Failed to update nginx.conf: {exec_result.stderr.decode('utf-8')}")
+                return
+            self.logger.info("nginx.conf updated successfully.")
+
+            self.logger.info(f"Restarting container: {container_name}")
+            container.restart()
+            self.logger.info(f"Container {container_name} restarted successfully.")
+        
+        except Exception as e:
+            self.logger.error(f"Error during nginx configuration: {str(e)}")
+        finally:
+            docker_client.close()
 
 class StandardQueryApi(object):
     def __init__(self, model_id, url):
