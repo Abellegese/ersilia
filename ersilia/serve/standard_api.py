@@ -3,6 +3,7 @@ import csv
 import json
 import importlib
 import docker
+import time
 import requests
 import asyncio
 import nest_asyncio
@@ -282,25 +283,34 @@ class StandardCSVRunApi(ErsiliaBase):
 
     def post(self, input, output, output_source=OutputSource.LOCAL_ONLY):
         input_data = self.serialize_to_json(input)
-        self.logger.debug(f"Serialized daata: {input_data}")
+        self.logger.debug(f"Serialized data: {input_data}")
         self.ensure_nginx_config()
-        if OutputSource.is_cloud(output_source):
-            store = InferenceStoreApi(model_id=self.model_id)
-            return store.get_precalculations(input_data)
-        url = "{0}/{1}".format(self.url, self.api_name)
-        self.logger.debug(f"Posting data to: {url}")
-    
-        response = requests.post(url, json=input_data)
-        self.logger.debug(f"Status Code: {response.status_code}")
-        if response.status_code == 200:
-            result = response.json()
-            self.logger.debug(f"Result: {result}")
-            output_data = self.serialize_to_csv(input_data, result, output)
-            self.logger.debug(f"Outdata: {result}")
-            return output_data
-        else:
+
+        container_name = self.get_running_container_name()
+        if not container_name:
+            self.logger.error("No running container found.")
             return None
-        
+
+        base_url = self.url.split('/')[2]
+        updated_url = self.url.replace(base_url.split(':')[0], container_name) 
+        self.logger.debug(f"Posting data to: {updated_url}")
+
+        try:
+            response = requests.post(updated_url, json=input_data)
+            self.logger.debug(f"Status Code: {response.status_code}")
+            if response.status_code == 200:
+                result = response.json()
+                self.logger.debug(f"Result: {result}")
+                output_data = self.serialize_to_csv(input_data, result, output)
+                self.logger.debug(f"Output data: {output_data}")
+                return output_data
+            else:
+                self.logger.error(f"API request failed with status code {response.status_code}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error during API request: {str(e)}")
+            return None
+
     def ensure_nginx_config(self):
         docker_client = docker.from_env()
 
@@ -309,32 +319,27 @@ class StandardCSVRunApi(ErsiliaBase):
             if not containers:
                 self.logger.error("No running containers found.")
                 return
-            
-            container = containers[0]  
+
+            container = containers[0]
             container_name = container.name
             self.logger.info(f"Found running container: {container_name}")
 
-            self.logger.info(f"Logging container output for {container_name}")
-            logs = container.logs().decode("utf-8")
-            self.logger.info(f"Container logs:\n{logs}")
-
             nginx_conf_path = "/etc/nginx/nginx.conf"
-            nginx_conf_update = """
-            http {
+            nginx_server_block = """
                 server {
                     listen 80;
                     location / {
-                        proxy_pass http://127.0.0.1:3000;
+                        proxy_pass http://{container_name}:3000;
                         proxy_set_header Host $host;
                         proxy_set_header X-Real-IP $remote_addr;
                         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                     }
                 }
-            }
-            """
-            self.logger.info(f"Updating nginx.conf in container: {container_name}")
+            """.format(container_name=container_name)
+
+            self.logger.info(f"Adding server block to nginx.conf in container: {container_name}")
             exec_result = container.exec_run(
-                cmd=f"sh -c 'echo \"{nginx_conf_update}\" > {nginx_conf_path}'",
+                cmd=f"sh -c 'sed -i \"/^http {{/a {nginx_server_block}\" {nginx_conf_path}'",
                 stdout=True,
                 stderr=True
             )
@@ -345,13 +350,29 @@ class StandardCSVRunApi(ErsiliaBase):
 
             self.logger.info(f"Restarting container: {container_name}")
             container.restart()
-            self.logger.info(f"Container {container_name} restarted successfully.")
-        
+
+            self.logger.info("Waiting for 5 seconds after restarting the container...")
+            time.sleep(5)
+            self.logger.info("Container restart complete.")
         except Exception as e:
             self.logger.error(f"Error during nginx configuration: {str(e)}")
         finally:
             docker_client.close()
 
+    def get_running_container_name(self):
+        """Fetch the name of the first running container."""
+        docker_client = docker.from_env()
+        try:
+            containers = docker_client.containers.list()
+            if containers:
+                return containers[0].name
+            else:
+                return None
+        except Exception as e:
+            self.logger.error(f"Error fetching container name: {str(e)}")
+            return None
+        finally:
+            docker_client.close()
 class StandardQueryApi(object):
     def __init__(self, model_id, url):
         # TODO This class will be used to query directly the calculations lake.
