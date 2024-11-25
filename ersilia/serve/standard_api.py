@@ -284,15 +284,11 @@ class StandardCSVRunApi(ErsiliaBase):
     def post(self, input, output, output_source=OutputSource.LOCAL_ONLY):
         input_data = self.serialize_to_json(input)
         self.logger.debug(f"Serialized data: {input_data}")
-
+        self.show_nginx_logs_and_config()
         self.check_api_health_and_ensure(self.url)
         
-        container_name = self.get_running_container_name()
-        if not container_name:
-            self.logger.error("No running container found.")
-            return None
-
         try:
+            self.logger.info(f"URL: {self.url}")
             response = requests.post(self.url, json=input_data)
             self.logger.debug(f"Status Code: {response.status_code}")
             if response.status_code == 200:
@@ -326,7 +322,7 @@ class StandardCSVRunApi(ErsiliaBase):
                 server {{
                     listen 80;
                     location / {{
-                        proxy_pass http://{container_name};
+                        proxy_pass http://127.0.0.1:3000;
                         proxy_set_header Host $host;
                         proxy_set_header X-Real-IP $remote_addr;
                         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -383,7 +379,6 @@ class StandardCSVRunApi(ErsiliaBase):
     
 
     def get_running_container_name(self):
-        """Fetch the name of the first running container."""
         docker_client = docker.from_env()
         try:
             containers = docker_client.containers.list()
@@ -394,6 +389,46 @@ class StandardCSVRunApi(ErsiliaBase):
         except Exception as e:
             self.logger.error(f"Error fetching container name: {str(e)}")
             return None
+        finally:
+            docker_client.close()
+
+    def show_nginx_logs_and_config(self):
+        docker_client = docker.from_env()
+
+        try:
+            containers = docker_client.containers.list()
+            if not containers:
+                self.logger.error("No running containers found.")
+                return
+
+            container = containers[0]
+            container_name = container.name
+            self.logger.info(f"Accessing Nginx logs and configuration for container: {container_name}")
+
+            error_log_path = "/var/log/nginx/error.log"
+            error_logs = container.exec_run(
+                cmd=f"sh -c 'cat {error_log_path}'",
+                stdout=True,
+                stderr=True
+            )
+            if error_logs.exit_code == 0:
+                self.logger.info(f"Nginx Error Logs for {container_name}:\n{error_logs.output.decode('utf-8')}")
+            else:
+                self.logger.error(f"Failed to fetch Nginx error logs: {error_logs.stderr.decode('utf-8')}")
+
+            nginx_conf_path = "/etc/nginx/nginx.conf"
+            nginx_config = container.exec_run(
+                cmd=f"sh -c 'cat {nginx_conf_path}'",
+                stdout=True,
+                stderr=True
+            )
+            if nginx_config.exit_code == 0:
+                self.logger.info(f"Nginx Configuration for {container_name}:\n{nginx_config.output.decode('utf-8')}")
+            else:
+                self.logger.error(f"Failed to fetch Nginx configuration: {nginx_config.stderr.decode('utf-8')}")
+
+        except Exception as e:
+            self.logger.error(f"Error fetching Nginx logs and configuration: {str(e)}")
         finally:
             docker_client.close()
 
