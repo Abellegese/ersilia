@@ -267,9 +267,8 @@ class StandardCSVRunApi(ErsiliaBase):
     def serialize_to_csv(self, input_data, result, output_data):
         if isinstance(result, dict) and 'result' in result:
             result = result['result'] 
-        k = 'score' 
+        k = 'model_score' 
         is_list = isinstance(result[0][k], list)
-
         with open(output_data, "w") as f:
             writer = csv.writer(f)
             writer.writerow(self.header) 
