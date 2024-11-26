@@ -265,23 +265,20 @@ class StandardCSVRunApi(ErsiliaBase):
         return True
     
     def serialize_to_csv(self, input_data, result, output_data):
-        k = list(result[0].keys())[0]
-        v = result[0][k]
-        if type(v) is list:
-            is_list = True
-        else:
-            is_list = False
+        if isinstance(result, dict) and 'result' in result:
+            result = result['result'] 
+        k = 'model_score' 
+        is_list = isinstance(result[0][k], list)
         with open(output_data, "w") as f:
             writer = csv.writer(f)
-            writer.writerow(self.header)
+            writer.writerow(self.header) 
+
             for i_d, r_d in zip(input_data, result):
-                v = r_d[k]
-                if not is_list:
-                    r = [i_d["key"], i_d["input"]] + [v]
-                else:
-                    r = [i_d["key"], i_d["input"]] + v
-                writer.writerow(r)
+                scores = r_d[k] if is_list else [r_d[k]]
+                row = [i_d["key"], i_d["input"]] + scores
+                writer.writerow(row)  
         return output_data
+
 
     def post(self, input, output, output_source=OutputSource.LOCAL_ONLY):
         input_data = self.serialize_to_json(input)
